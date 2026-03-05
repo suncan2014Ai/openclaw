@@ -1,6 +1,5 @@
 import { normalizeChatType } from "../../channels/chat-type.js";
 import { resolveSenderLabel } from "../../channels/sender-label.js";
-import { formatZonedTimestamp } from "../../infra/format-time/format-datetime.js";
 import type { TemplateContext } from "../templating.js";
 
 function safeTrim(value: unknown): string | undefined {
@@ -9,26 +8,6 @@ function safeTrim(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
-}
-
-function formatConversationTimestamp(value: unknown): string | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return undefined;
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return undefined;
-  }
-  const formatted = formatZonedTimestamp(date);
-  if (!formatted) {
-    return undefined;
-  }
-  try {
-    const weekday = new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(date);
-    return weekday ? `${weekday} ${formatted}` : formatted;
-  } catch {
-    return formatted;
-  }
 }
 
 function resolveInboundChannel(ctx: TemplateContext): string | undefined {
@@ -81,48 +60,44 @@ export function buildInboundMetaSystemPrompt(ctx: TemplateContext): string {
   ].join("\n");
 }
 
+function clipInboundContextText(value: unknown, maxChars = 320): string {
+  if (!value) {
+    return "";
+  }
+  const text =
+    typeof value === "string"
+      ? value.trim()
+      : typeof value === "number" || typeof value === "boolean" || typeof value === "bigint"
+        ? `${value}`.trim()
+        : "";
+  if (!text) {
+    return "";
+  }
+  if (text.length <= maxChars) {
+    return text;
+  }
+  return `${text.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+}
+
 export function buildInboundUserContextPrefix(ctx: TemplateContext): string {
   const blocks: string[] = [];
   const chatType = normalizeChatType(ctx.ChatType);
   const isDirect = !chatType || chatType === "direct";
   const directChannelValue = resolveInboundChannel(ctx);
-  const includeDirectConversationInfo = Boolean(
-    directChannelValue && directChannelValue !== "webchat",
-  );
-  const shouldIncludeConversationInfo = !isDirect || includeDirectConversationInfo;
-
-  const messageId = safeTrim(ctx.MessageSid);
-  const messageIdFull = safeTrim(ctx.MessageSidFull);
-  const resolvedMessageId = messageId ?? messageIdFull;
-  const timestampStr = formatConversationTimestamp(ctx.Timestamp);
+  const shouldIncludeConversationInfo =
+    !isDirect || Boolean(directChannelValue && directChannelValue !== "webchat");
 
   const conversationInfo = {
-    message_id: shouldIncludeConversationInfo ? resolvedMessageId : undefined,
-    reply_to_id: shouldIncludeConversationInfo ? safeTrim(ctx.ReplyToId) : undefined,
-    sender_id: shouldIncludeConversationInfo ? safeTrim(ctx.SenderId) : undefined,
     conversation_label: isDirect ? undefined : safeTrim(ctx.ConversationLabel),
     sender: shouldIncludeConversationInfo
-      ? (safeTrim(ctx.SenderName) ??
-        safeTrim(ctx.SenderE164) ??
-        safeTrim(ctx.SenderId) ??
-        safeTrim(ctx.SenderUsername))
+      ? (safeTrim(ctx.SenderName) ?? safeTrim(ctx.SenderUsername))
       : undefined,
-    timestamp: timestampStr,
-    group_subject: safeTrim(ctx.GroupSubject),
-    group_channel: safeTrim(ctx.GroupChannel),
-    group_space: safeTrim(ctx.GroupSpace),
-    thread_label: safeTrim(ctx.ThreadLabel),
-    topic_id: ctx.MessageThreadId != null ? String(ctx.MessageThreadId) : undefined,
     is_forum: ctx.IsForum === true ? true : undefined,
     is_group_chat: !isDirect ? true : undefined,
     was_mentioned: ctx.WasMentioned === true ? true : undefined,
     has_reply_context: ctx.ReplyToBody ? true : undefined,
     has_forwarded_context: ctx.ForwardedFrom ? true : undefined,
     has_thread_starter: safeTrim(ctx.ThreadStarterBody) ? true : undefined,
-    history_count:
-      Array.isArray(ctx.InboundHistory) && ctx.InboundHistory.length > 0
-        ? ctx.InboundHistory.length
-        : undefined,
   };
   if (Object.values(conversationInfo).some((v) => v !== undefined)) {
     blocks.push(
@@ -143,11 +118,9 @@ export function buildInboundUserContextPrefix(ctx: TemplateContext): string {
       e164: safeTrim(ctx.SenderE164),
       id: safeTrim(ctx.SenderId),
     }),
-    id: safeTrim(ctx.SenderId),
     name: safeTrim(ctx.SenderName),
     username: safeTrim(ctx.SenderUsername),
     tag: safeTrim(ctx.SenderTag),
-    e164: safeTrim(ctx.SenderE164),
   };
   if (senderInfo?.label) {
     blocks.push(
@@ -162,7 +135,7 @@ export function buildInboundUserContextPrefix(ctx: TemplateContext): string {
       [
         "Thread starter (untrusted, for context):",
         "```json",
-        JSON.stringify({ body: ctx.ThreadStarterBody }, null, 2),
+        JSON.stringify({ body: clipInboundContextText(ctx.ThreadStarterBody, 480) }, null, 2),
         "```",
       ].join("\n"),
     );
@@ -177,7 +150,7 @@ export function buildInboundUserContextPrefix(ctx: TemplateContext): string {
           {
             sender_label: safeTrim(ctx.ReplyToSender),
             is_quote: ctx.ReplyToIsQuote === true ? true : undefined,
-            body: ctx.ReplyToBody,
+            body: clipInboundContextText(ctx.ReplyToBody, 480),
           },
           null,
           2,
@@ -200,7 +173,6 @@ export function buildInboundUserContextPrefix(ctx: TemplateContext): string {
             title: safeTrim(ctx.ForwardedFromTitle),
             signature: safeTrim(ctx.ForwardedFromSignature),
             chat_type: safeTrim(ctx.ForwardedFromChatType),
-            date_ms: typeof ctx.ForwardedDate === "number" ? ctx.ForwardedDate : undefined,
           },
           null,
           2,
@@ -216,11 +188,12 @@ export function buildInboundUserContextPrefix(ctx: TemplateContext): string {
         "Chat history since last reply (untrusted, for context):",
         "```json",
         JSON.stringify(
-          ctx.InboundHistory.map((entry) => ({
-            sender: entry.sender,
-            timestamp_ms: entry.timestamp,
-            body: entry.body,
-          })),
+          ctx.InboundHistory.slice(-3)
+            .map((entry) => ({
+              sender: entry.sender,
+              body: clipInboundContextText(entry.body, 320),
+            }))
+            .filter((entry) => entry.sender || entry.body),
           null,
           2,
         ),

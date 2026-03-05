@@ -112,4 +112,65 @@ describe("buildSystemPromptReport", () => {
 
     expect(report.injectedWorkspaceFiles[0]?.injectedChars).toBe("trimmed".length);
   });
+
+  it("counts Project Context at the end of prompt (new layout)", () => {
+    const report = buildSystemPromptReport({
+      source: "run",
+      generatedAt: 0,
+      bootstrapMaxChars: 20_000,
+      systemPrompt: [
+        "System header",
+        "## Silent Replies",
+        "silent",
+        "## Heartbeats",
+        "heartbeats",
+        "## Runtime",
+        "runtime",
+        "# Project Context",
+        "The following project context files have been loaded:",
+        "## AGENTS.md",
+        "alpha",
+      ].join("\n"),
+      bootstrapFiles: [],
+      injectedFiles: [],
+      skillsPrompt: "",
+      tools: [],
+    });
+
+    expect(report.systemPrompt.projectContextChars).toBeGreaterThan(0);
+    expect(report.systemPrompt.nonProjectContextChars).toBeLessThan(report.systemPrompt.chars);
+  });
+
+  it("supports legacy layout where Project Context appears before Silent Replies", () => {
+    const systemPrompt = [
+      "System header",
+      "# Project Context",
+      "The following project context files have been loaded:",
+      "## AGENTS.md",
+      "alpha",
+      "## Silent Replies",
+      "silent",
+      "## Runtime",
+      "runtime",
+    ].join("\n");
+
+    const report = buildSystemPromptReport({
+      source: "run",
+      generatedAt: 0,
+      bootstrapMaxChars: 20_000,
+      systemPrompt,
+      bootstrapFiles: [],
+      injectedFiles: [],
+      skillsPrompt: "",
+      tools: [],
+    });
+
+    const projectContextMarker = "\n# Project Context\n";
+    const projectStart = systemPrompt.indexOf(projectContextMarker);
+    const silentStart = systemPrompt.indexOf("\n## Silent Replies\n");
+    const expectedProjectContext =
+      projectStart === -1 ? 0 : systemPrompt.slice(projectStart, silentStart).length;
+
+    expect(report.systemPrompt.projectContextChars).toBe(expectedProjectContext);
+  });
 });

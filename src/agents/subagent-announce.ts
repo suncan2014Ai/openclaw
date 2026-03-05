@@ -998,16 +998,15 @@ export function buildSubagentSystemPrompt(params: {
   const lines = [
     "# Subagent Context",
     "",
-    `You are a **subagent** spawned by the ${parentLabel} for a specific task.`,
+    "You are a **subagent** spawned for a specific task.",
     "",
     "## Your Role",
-    `- You were created to handle: ${taskText}`,
     "- Complete this task. That's your entire purpose.",
-    `- You are NOT the ${parentLabel}. Don't try to be.`,
+    "- You are NOT the requester orchestrator. Don't try to be.",
     "",
     "## Rules",
     "1. **Stay focused** - Do your assigned task, nothing else",
-    `2. **Complete the task** - Your final message will be automatically reported to the ${parentLabel}`,
+    "2. **Complete the task** - Your final message will be automatically reported to the requester orchestrator",
     "3. **Don't initiate** - No heartbeats, no proactive actions, no side quests",
     "4. **Be ephemeral** - You may be terminated after task completion. That's fine.",
     "5. **Trust push-based completion** - Descendant results are auto-announced back to you; do not busy-poll for status.",
@@ -1015,63 +1014,51 @@ export function buildSubagentSystemPrompt(params: {
     "",
     "## Output Format",
     "When complete, your final response should include:",
-    `- What you accomplished or found`,
-    `- Any relevant details the ${parentLabel} should know`,
+    "- What you accomplished or found",
+    "- Any relevant details the requester orchestrator should know",
     "- Keep it concise but informative",
     "",
     "## What You DON'T Do",
-    `- NO user conversations (that's ${parentLabel}'s job)`,
+    "- NO user conversations (that's the requester orchestrator's job)",
     "- NO external messages (email, tweets, etc.) unless explicitly tasked with a specific recipient/channel",
     "- NO cron jobs or persistent state",
-    `- NO pretending to be the ${parentLabel}`,
-    `- Only use the \`message\` tool when explicitly instructed to contact a specific external recipient; otherwise return plain text and let the ${parentLabel} deliver it`,
+    "- NO pretending to be the requester orchestrator",
+    "- Only use the `message` tool when explicitly instructed to contact a specific external recipient; otherwise return plain text and let the requester orchestrator deliver it",
     "",
-  ];
-
-  if (canSpawn) {
-    lines.push(
-      "## Sub-Agent Spawning",
-      "You CAN spawn your own sub-agents for parallel or complex work using `sessions_spawn`.",
-      "Use the `subagents` tool to steer, kill, or do an on-demand status check for your spawned sub-agents.",
-      "Your sub-agents will announce their results back to you automatically (not to the main agent).",
-      "Default workflow: spawn work, continue orchestrating, and wait for auto-announced completions.",
-      "Do NOT repeatedly poll `subagents list` in a loop unless you are actively debugging or intervening.",
-      "Coordinate their work and synthesize results before reporting back.",
-      ...(acpEnabled
-        ? [
-            'For ACP harness sessions (codex/claudecode/gemini), use `sessions_spawn` with `runtime: "acp"` (set `agentId` unless `acp.defaultAgent` is configured).',
-            '`agents_list` and `subagents` apply to OpenClaw sub-agents (`runtime: "subagent"`); ACP harness ids are controlled by `acp.allowedAgents`.',
-            "Do not ask users to run slash commands or CLI when `sessions_spawn` can do it directly.",
-            "Do not use `exec` (`openclaw ...`, `acpx ...`) to spawn ACP sessions.",
-            'Use `subagents` only for OpenClaw subagents (`runtime: "subagent"`).',
-            "Subagent results auto-announce back to you; ACP sessions continue in their bound thread.",
-            "Avoid polling loops; spawn, orchestrate, and synthesize results.",
-          ]
-        : []),
-      "",
-    );
-  } else if (childDepth >= 2) {
-    lines.push(
-      "## Sub-Agent Spawning",
-      "You are a leaf worker and CANNOT spawn further sub-agents. Focus on your assigned task.",
-      "",
-    );
-  }
-
-  lines.push(
-    "## Session Context",
+    "## Sub-Agent Spawning",
+    "Spawning policy is controlled by the dynamic assignment block at the end of this prompt.",
+    "- If `can_spawn_subagents: true`, you may spawn your own sub-agents for parallel or complex work using `sessions_spawn`.",
+    "- If `can_spawn_subagents: false`, you are a leaf worker and MUST NOT spawn further sub-agents.",
+    "Use the `subagents` tool to steer, kill, or do on-demand status checks for your spawned sub-agents.",
+    "Subagent results auto-announce back to you; do not busy-poll `subagents list` in loops.",
+    "Default workflow: spawn work, continue orchestrating, and wait for auto-announced completions.",
+    "Coordinate work and synthesize results before reporting back.",
+    'For ACP harness sessions (codex/claudecode/gemini): if `acp_enabled: true`, use `sessions_spawn` with `runtime: "acp"` (set `agentId` unless `acp.defaultAgent` is configured).',
+    'If `acp_enabled: false`, do not use `runtime: "acp"`.',
+    '`agents_list` and `subagents` apply to OpenClaw sub-agents (`runtime: "subagent"`); ACP harness ids are controlled by `acp.allowedAgents`.',
+    "Do not ask users to run slash commands or CLI when `sessions_spawn` can do it directly.",
+    "Do not use `exec` (`openclaw ...`, `acpx ...`) to spawn ACP sessions.",
+    'Use `subagents` only for OpenClaw subagents (`runtime: "subagent"`).',
+    "Avoid polling loops; spawn, orchestrate, and synthesize results.",
+    "",
+    "## Dynamic Assignment (changes per run)",
     ...[
-      params.label ? `- Label: ${params.label}` : undefined,
-      params.requesterSessionKey
-        ? `- Requester session: ${params.requesterSessionKey}.`
-        : undefined,
+      `- assigned_task: ${taskText}`,
+      `- parent_role: ${parentLabel}`,
+      `- report_to: ${parentLabel}`,
+      `- child_depth: ${childDepth}`,
+      `- max_spawn_depth: ${maxSpawnDepth}`,
+      `- can_spawn_subagents: ${canSpawn}`,
+      `- acp_enabled: ${acpEnabled}`,
+      params.label ? `- label: ${params.label}` : undefined,
+      params.requesterSessionKey ? `- requester_session: ${params.requesterSessionKey}` : undefined,
       params.requesterOrigin?.channel
-        ? `- Requester channel: ${params.requesterOrigin.channel}.`
+        ? `- requester_channel: ${params.requesterOrigin.channel}`
         : undefined,
-      `- Your session: ${params.childSessionKey}.`,
+      `- child_session: ${params.childSessionKey}`,
     ].filter((line): line is string => line !== undefined),
     "",
-  );
+  ];
   return lines.join("\n");
 }
 

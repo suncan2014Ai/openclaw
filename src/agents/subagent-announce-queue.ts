@@ -13,6 +13,7 @@ import {
   clearQueueSummaryState,
   drainCollectQueueStep,
   drainNextQueueItem,
+  elideQueueText,
   hasCrossChannelItems,
   previewQueueSummaryPrompt,
   waitForQueueDebounce,
@@ -147,7 +148,8 @@ function scheduleAnnounceDrain(key: string) {
             title: "[Queued announce messages while agent was busy]",
             items,
             summary,
-            renderItem: (item, idx) => `---\nQueued #${idx + 1}\n${item.prompt}`.trim(),
+            renderItem: (item, idx) =>
+              `---\nQueued #${idx + 1}\n${elideQueueText(item.prompt.replace(/\s+/g, " "), 1600)}`.trim(),
           });
           const internalEvents = items.flatMap((item) => item.internalEvents ?? []);
           const last = items.at(-1);

@@ -77,6 +77,29 @@ function extractToolListText(systemPrompt: string): string {
   return extracted.text.replace(markerA, "").trim();
 }
 
+function extractProjectContextText(systemPrompt: string): string {
+  const marker = "\n# Project Context\n";
+  const start = systemPrompt.indexOf(marker);
+  if (start === -1) {
+    return "";
+  }
+
+  const fromProject = systemPrompt.slice(start);
+
+  // Backward compatibility for older prompt layouts where Project Context sat
+  // before some static sections. New layout places Project Context at the end.
+  const legacyEnds = [
+    fromProject.indexOf("\n## Silent Replies\n"),
+    fromProject.indexOf("\n## Heartbeats\n"),
+    fromProject.indexOf("\n## Runtime\n"),
+  ].filter((idx) => idx > 0);
+
+  if (legacyEnds.length === 0) {
+    return fromProject;
+  }
+  return fromProject.slice(0, Math.min(...legacyEnds));
+}
+
 export function buildSystemPromptReport(params: {
   source: SessionSystemPromptReport["source"];
   generatedAt: number;
@@ -96,12 +119,7 @@ export function buildSystemPromptReport(params: {
   tools: AgentTool[];
 }): SessionSystemPromptReport {
   const systemPrompt = params.systemPrompt.trim();
-  const projectContext = extractBetween(
-    systemPrompt,
-    "\n# Project Context\n",
-    "\n## Silent Replies\n",
-  );
-  const projectContextChars = projectContext.text.length;
+  const projectContextChars = extractProjectContextText(systemPrompt).length;
   const toolListText = extractToolListText(systemPrompt);
   const toolListChars = toolListText.length;
   const toolsEntries = buildToolsEntries(params.tools);

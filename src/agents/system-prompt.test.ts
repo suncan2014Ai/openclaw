@@ -496,6 +496,66 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("Bravo");
   });
 
+  it("keeps runtime/static sections before Project Context", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      contextFiles: [{ path: "SOUL.md", content: "Persona" }],
+      heartbeatPrompt: "heartbeat-check",
+    });
+
+    const projectContextIndex = prompt.indexOf("\n# Project Context\n");
+    const silentRepliesIndex = prompt.indexOf("\n## Silent Replies\n");
+    const heartbeatsIndex = prompt.indexOf("\n## Heartbeats\n");
+    const runtimeIndex = prompt.indexOf("\n## Runtime\n");
+
+    expect(projectContextIndex).toBeGreaterThan(-1);
+    expect(silentRepliesIndex).toBeGreaterThan(-1);
+    expect(heartbeatsIndex).toBeGreaterThan(-1);
+    expect(runtimeIndex).toBeGreaterThan(-1);
+    expect(projectContextIndex).toBeGreaterThan(silentRepliesIndex);
+    expect(projectContextIndex).toBeGreaterThan(heartbeatsIndex);
+    expect(projectContextIndex).toBeGreaterThan(runtimeIndex);
+  });
+
+  it("keeps the static prefix stable before Tooling across dynamic workspace inputs", () => {
+    const promptA = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/workspace-a",
+      toolNames: ["read", "write", "exec"],
+      contextFiles: [{ path: "SOUL.md", content: "persona-a" }],
+      runtimeInfo: {
+        host: "host-a",
+        os: "macOS",
+        arch: "arm64",
+        node: "v20",
+        model: "provider/model-a",
+        channel: "telegram",
+      },
+    });
+    const promptB = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/workspace-b",
+      toolNames: ["read", "write", "exec", "message"],
+      contextFiles: [{ path: "SOUL.md", content: "persona-b" }],
+      runtimeInfo: {
+        host: "host-b",
+        os: "Linux",
+        arch: "x64",
+        node: "v22",
+        model: "provider/model-b",
+        channel: "discord",
+      },
+    });
+
+    const marker = "\n## Tooling\n";
+    const markerA = promptA.indexOf(marker);
+    const markerB = promptB.indexOf(marker);
+    expect(markerA).toBeGreaterThan(-1);
+    expect(markerB).toBeGreaterThan(-1);
+
+    const prefixA = promptA.slice(0, markerA);
+    const prefixB = promptB.slice(0, markerB);
+    expect(prefixA).toBe(prefixB);
+  });
+
   it("ignores context files with missing or blank paths", () => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",
@@ -684,9 +744,8 @@ describe("buildSubagentSystemPrompt", () => {
     });
 
     expect(prompt).toContain("## Sub-Agent Spawning");
-    expect(prompt).toContain(
-      "You CAN spawn your own sub-agents for parallel or complex work using `sessions_spawn`.",
-    );
+    expect(prompt).toContain("Spawning policy is controlled by the dynamic assignment block");
+    expect(prompt).toContain("If `can_spawn_subagents: true`");
     expect(prompt).toContain("sessions_spawn");
     expect(prompt).toContain('runtime: "acp"');
     expect(prompt).toContain("For ACP harness sessions (codex/claudecode/gemini)");
@@ -696,8 +755,12 @@ describe("buildSubagentSystemPrompt", () => {
     expect(prompt).toContain("Use `subagents` only for OpenClaw subagents");
     expect(prompt).toContain("Subagent results auto-announce back to you");
     expect(prompt).toContain("Avoid polling loops");
-    expect(prompt).toContain("spawned by the main agent");
-    expect(prompt).toContain("reported to the main agent");
+    expect(prompt).toContain("## Dynamic Assignment (changes per run)");
+    expect(prompt).toContain("assigned_task: research task");
+    expect(prompt).toContain("parent_role: main agent");
+    expect(prompt).toContain("report_to: main agent");
+    expect(prompt).toContain("can_spawn_subagents: true");
+    expect(prompt).toContain("acp_enabled: true");
     expect(prompt).toContain("[compacted: tool output removed to free context]");
     expect(prompt).toContain("[truncated: output exceeded context limit]");
     expect(prompt).toContain("offset/limit");
@@ -713,10 +776,10 @@ describe("buildSubagentSystemPrompt", () => {
       acpEnabled: false,
     });
 
-    expect(prompt).not.toContain('runtime: "acp"');
-    expect(prompt).not.toContain("For ACP harness sessions (codex/claudecode/gemini)");
-    expect(prompt).not.toContain("set `agentId` unless `acp.defaultAgent` is configured");
-    expect(prompt).toContain("You CAN spawn your own sub-agents");
+    expect(prompt).toContain("## Sub-Agent Spawning");
+    expect(prompt).toContain('runtime: "acp"');
+    expect(prompt).toContain("acp_enabled: false");
+    expect(prompt).toContain("can_spawn_subagents: true");
   });
 
   it("renders depth-2 leaf guidance with parent orchestrator labels", () => {
@@ -728,13 +791,13 @@ describe("buildSubagentSystemPrompt", () => {
     });
 
     expect(prompt).toContain("## Sub-Agent Spawning");
-    expect(prompt).toContain("leaf worker");
-    expect(prompt).toContain("CANNOT spawn further sub-agents");
-    expect(prompt).toContain("spawned by the parent orchestrator");
-    expect(prompt).toContain("reported to the parent orchestrator");
+    expect(prompt).toContain("If `can_spawn_subagents: false`, you are a leaf worker");
+    expect(prompt).toContain("parent_role: parent orchestrator");
+    expect(prompt).toContain("report_to: parent orchestrator");
+    expect(prompt).toContain("can_spawn_subagents: false");
   });
 
-  it("omits spawning guidance for depth-1 leaf agents", () => {
+  it("keeps static spawning guidance and switches dynamic flags for depth-1 leaf agents", () => {
     const leafCases = [
       {
         name: "explicit maxSpawnDepth 1",
@@ -758,10 +821,10 @@ describe("buildSubagentSystemPrompt", () => {
 
     for (const testCase of leafCases) {
       const prompt = buildSubagentSystemPrompt(testCase.input);
-      expect(prompt, testCase.name).not.toContain("## Sub-Agent Spawning");
-      expect(prompt, testCase.name).not.toContain("You CAN spawn");
+      expect(prompt, testCase.name).toContain("## Sub-Agent Spawning");
+      expect(prompt, testCase.name).toContain("can_spawn_subagents: false");
       if (testCase.expectMainAgentLabel) {
-        expect(prompt, testCase.name).toContain("spawned by the main agent");
+        expect(prompt, testCase.name).toContain("parent_role: main agent");
       }
     }
   });

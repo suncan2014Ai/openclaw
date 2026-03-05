@@ -5,6 +5,7 @@ import {
   clearQueueSummaryState,
   drainCollectQueueStep,
   drainNextQueueItem,
+  elideQueueText,
   hasCrossChannelItems,
   previewQueueSummaryPrompt,
   waitForQueueDebounce,
@@ -114,7 +115,8 @@ export function scheduleFollowupDrain(
             title: "[Queued messages while agent was busy]",
             items,
             summary,
-            renderItem: (item, idx) => `---\nQueued #${idx + 1}\n${item.prompt}`.trim(),
+            renderItem: (item, idx) =>
+              `---\nQueued #${idx + 1}\n${elideQueueText(item.prompt.replace(/\s+/g, " "), 1600)}`.trim(),
           });
           await runFollowup({
             prompt,
