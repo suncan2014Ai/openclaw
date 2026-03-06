@@ -7,9 +7,9 @@ import { customElement, property } from "lit/decorators.js";
  */
 @customElement("resizable-divider")
 export class ResizableDivider extends LitElement {
-  @property({ type: Number }) splitRatio = 0.6;
-  @property({ type: Number }) minRatio = 0.4;
-  @property({ type: Number }) maxRatio = 0.7;
+  @property({ type: Number }) accessor splitRatio = 0.6;
+  @property({ type: Number }) accessor minRatio = 0.4;
+  @property({ type: Number }) accessor maxRatio = 0.7;
 
   private isDragging = false;
   private startX = 0;
